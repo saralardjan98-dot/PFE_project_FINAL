@@ -4,6 +4,7 @@ File upload, parsing, and management endpoints
 """
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
 import os
@@ -48,10 +49,10 @@ def upload_file(
     # ── Validate file type ──
     filename = file.filename or "unknown"
     file_ext = filename.split(".")[-1].lower()
-    if file_ext not in ["las", "csv"]:
+    if file_ext not in ["las", "csv", "xlsx", "xls", "json"]:
         raise HTTPException(
             status_code=400,
-            detail="Only .las and .csv files are supported"
+            detail="Only .las, .csv, .xlsx, and .json files are supported"
         )
 
     # ── Save file ──
@@ -209,3 +210,41 @@ def delete_file(
     db.commit()
 
     return {"message": "File deleted"}
+
+
+@router.get("/files/{file_id}/download")
+def download_file(
+    file_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserOut = Depends(get_current_user),
+):
+    """
+    Download the raw stored file
+    """
+    well_file = db.query(WellFile).filter(WellFile.id == file_id).first()
+    if not well_file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # ── Check access ──
+    well = db.query(Well).filter(Well.id == well_file.well_id).first()
+    if well.created_by != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not os.path.exists(well_file.file_path):
+        raise HTTPException(status_code=404, detail="File on disk not found")
+
+    # Set media type based on extension
+    media_type = "application/octet-stream"
+    ext = well_file.file_type.lower()
+    if ext == "json":
+        media_type = "application/json"
+    elif ext == "csv":
+        media_type = "text/csv"
+    elif ext in ["xlsx", "xls"]:
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    return FileResponse(
+        path=well_file.file_path,
+        media_type=media_type,
+        filename=well_file.name
+    )

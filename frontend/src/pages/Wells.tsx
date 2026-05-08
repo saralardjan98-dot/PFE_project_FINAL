@@ -41,6 +41,7 @@ const statusVariant: Record<string, string> = {
   drilling: "bg-primary/15 text-primary border-primary/30",
   completed: "bg-info/15 text-info border-info/30",
   inactive: "bg-muted text-muted-foreground border-border",
+  maintenance: "bg-warning/15 text-warning border-warning/30",
 };
 
 const statusLabels: Record<string, string> = {
@@ -48,11 +49,14 @@ const statusLabels: Record<string, string> = {
   drilling: "Forage",
   completed: "Complété",
   inactive: "Inactif",
+  maintenance: "Maintenance",
 };
 
 export default function Wells() {
   const [search, setSearch] = useState("");
   const [fieldFilter, setFieldFilter] = useState("all");
+  const [zoneFilter, setZoneFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [wellsList, setWellsList] = useState<Well[]>([]);
   const [editingWell, setEditingWell] = useState<Well | null>(null);
   const [deletingWell, setDeletingWell] = useState<Well | null>(null);
@@ -89,13 +93,16 @@ export default function Wells() {
   }, []);
 
   const fields = [...new Set(wellsList.map(w => w.field).filter(Boolean))];
+  const zones = [...new Set(wellsList.map(w => w.zone || w.region).filter(Boolean))];
 
   const filtered = wellsList.filter(w => {
     const matchSearch =
       (w.name?.toLowerCase() || "").includes(search.toLowerCase()) ||
       (w.code?.toLowerCase() || "").includes(search.toLowerCase());
     const matchField = fieldFilter === "all" || w.field === fieldFilter;
-    return matchSearch && matchField;
+    const matchZone = zoneFilter === "all" || w.zone === zoneFilter || w.region === zoneFilter;
+    const matchStatus = statusFilter === "all" || w.status === statusFilter;
+    return matchSearch && matchField && matchZone && matchStatus;
   });
 
   // ── تعديل پوئي ──
@@ -304,6 +311,7 @@ export default function Wells() {
                       <SelectItem value="drilling">Forage</SelectItem>
                       <SelectItem value="completed">Complété</SelectItem>
                       <SelectItem value="inactive">Inactif</SelectItem>
+                      <SelectItem value="maintenance">Maintenance</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -322,8 +330,8 @@ export default function Wells() {
       </div>
 
       {/* ── Filtres ── */}
-      <div className="flex gap-3">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex flex-wrap gap-3">
+        <div className="relative flex-1 min-w-[250px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             placeholder="Rechercher des puits..."
@@ -333,13 +341,37 @@ export default function Wells() {
           />
         </div>
         <Select value={fieldFilter} onValueChange={setFieldFilter}>
-          <SelectTrigger className="w-48">
+          <SelectTrigger className="w-40">
             <Filter className="w-4 h-4 mr-2" />
-            <SelectValue placeholder="Filtrer par champ" />
+            <SelectValue placeholder="Champ" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Tous les Champs</SelectItem>
             {fields.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={zoneFilter} onValueChange={setZoneFilter}>
+          <SelectTrigger className="w-40">
+            <Filter className="w-4 h-4 mr-2" />
+            <SelectValue placeholder="Zone" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Toutes les Zones</SelectItem>
+            {zones.map(z => <SelectItem key={String(z)} value={String(z)}>{String(z)}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-40">
+            <Filter className="w-4 h-4 mr-2" />
+            <SelectValue placeholder="Statut" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous les Statuts</SelectItem>
+            <SelectItem value="active">Actif</SelectItem>
+            <SelectItem value="inactive">Inactif</SelectItem>
+            <SelectItem value="maintenance">Maintenance</SelectItem>
+            <SelectItem value="drilling">Forage</SelectItem>
+            <SelectItem value="completed">Complété</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -488,6 +520,7 @@ export default function Wells() {
                   <SelectItem value="drilling">Forage</SelectItem>
                   <SelectItem value="completed">Complété</SelectItem>
                   <SelectItem value="inactive">Inactif</SelectItem>
+                  <SelectItem value="maintenance">Maintenance</SelectItem>
                 </SelectContent>
               </Select>
             </div>

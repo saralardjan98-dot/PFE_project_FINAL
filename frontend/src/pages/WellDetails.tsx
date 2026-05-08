@@ -1,5 +1,5 @@
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Upload, FileText, MapPin, Calendar, Ruler, Building2, Trash2 } from "lucide-react";
+import { ArrowLeft, Upload, FileText, MapPin, Calendar, Ruler, Building2, Trash2, Download } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -82,6 +82,24 @@ export default function WellDetails() {
     }
   };
 
+  // ── download file ──
+  const handleDownloadFile = async (fileId: number, filename: string) => {
+    try {
+      const response = await api.get(`/files/${fileId}/download`, {
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+    } catch (err) {
+      alert("Erreur lors du téléchargement");
+    }
+  };
+
   if (loading) return <p className="text-muted-foreground p-8">Chargement...</p>;
   if (!well) return <p className="text-muted-foreground p-8">Puits introuvable</p>;
 
@@ -147,7 +165,7 @@ export default function WellDetails() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".las,.csv"
+            accept=".las,.csv,.xlsx,.json"
             className="hidden"
             onChange={handleUpload}
           />
@@ -190,14 +208,30 @@ export default function WellDetails() {
                     {new Date(file.uploaded_at).toLocaleDateString()}
                   </span>
                 </Link>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => handleDeleteFile(file.id)}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-primary"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleDownloadFile(file.id, file.name);
+                    }}
+                  >
+                    <Download className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-destructive hover:text-destructive"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleDeleteFile(file.id);
+                    }}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
             ))}
           </div>

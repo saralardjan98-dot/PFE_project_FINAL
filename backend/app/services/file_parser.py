@@ -5,6 +5,7 @@ Extracts curves, metadata, and numeric data for visualization.
 import io
 import os
 import math
+import json
 from typing import Dict, List, Optional, Tuple, Any
 
 import pandas as pd
@@ -138,6 +139,81 @@ def parse_csv_file(file_bytes: bytes) -> Dict[str, Any]:
     }
 
 
+# ─────────────────────────── Excel Parser ────────────────────────────
+
+def parse_excel_file(file_bytes: bytes) -> Dict[str, Any]:
+    """
+    Parse Excel petrophysical file.
+    Assumes first row = headers, first column = depth.
+    """
+    try:
+        df = pd.read_excel(io.BytesIO(file_bytes))
+    except Exception as e:
+        raise ValueError(f"Impossible de lire le fichier Excel: {e}")
+
+    if df.empty:
+        raise ValueError("Le fichier Excel est vide")
+
+    columns = list(df.columns)
+    curves = [{"name": col, "unit": ""} for col in columns]
+
+    # First column is assumed to be depth
+    depth_col = columns[0]
+    depths = df[depth_col].dropna().tolist()
+
+    data: Dict[str, list] = {}
+    for col in columns:
+        data[col] = [None if pd.isna(v) else float(v) for v in df[col]]
+
+    return {
+        "well_name": None,
+        "curves": curves,
+        "depth_min": min(depths) if depths else None,
+        "depth_max": max(depths) if depths else None,
+        "data": data,
+    }
+
+
+# ─────────────────────────── JSON Parser ────────────────────────────
+
+def parse_json_file(file_bytes: bytes) -> Dict[str, Any]:
+    """
+    Parse JSON petrophysical file.
+    """
+    try:
+        raw_json = json.loads(file_bytes.decode('utf-8'))
+        if isinstance(raw_json, list):
+            df = pd.DataFrame(raw_json)
+        elif isinstance(raw_json, dict) and "data" in raw_json:
+            df = pd.DataFrame(raw_json["data"])
+        else:
+            df = pd.DataFrame([raw_json])
+    except Exception as e:
+        raise ValueError(f"Impossible de lire le fichier JSON: {e}")
+
+    if df.empty:
+        raise ValueError("Le fichier JSON est vide")
+
+    columns = list(df.columns)
+    curves = [{"name": col, "unit": ""} for col in columns]
+
+    # Find depth column
+    depth_col = next((col for col in columns if col.lower() in ["depth", "dept"]), columns[0])
+    depths = df[depth_col].dropna().tolist()
+
+    data: Dict[str, list] = {}
+    for col in columns:
+        data[col] = [None if pd.isna(v) else float(v) for v in df[col]]
+
+    return {
+        "well_name": None,
+        "curves": curves,
+        "depth_min": min(depths) if depths else None,
+        "depth_max": max(depths) if depths else None,
+        "data": data,
+    }
+
+
 # ─────────────────────── Curve data endpoint ───────────────────────
 
 def get_curve_data_from_file(
@@ -157,9 +233,15 @@ def get_curve_data_from_file(
         raw = f.read()
 
     if file_type.upper() == "LAS":
-        parsed = parse_las_file(raw)
-    else:
+        parsed = parse_las_file(file_path)
+    elif file_type.upper() == "CSV":
         parsed = parse_csv_file(raw)
+    elif file_type.upper() in ["XLSX", "XLS"]:
+        parsed = parse_excel_file(raw)
+    elif file_type.upper() == "JSON":
+        parsed = parse_json_file(raw)
+    else:
+        raise ValueError(f"Unsupported file type: {file_type}")
 
     curve_defs = parsed["curves"]
     data = parsed["data"]
@@ -214,6 +296,12 @@ def parse_file(file_path: str, file_type: str) -> dict:
         elif file_type.lower() == "csv":
             with open(file_path, "rb") as f:
                 return parse_csv_file(f.read())
+        elif file_type.lower() in ["xlsx", "xls"]:
+            with open(file_path, "rb") as f:
+                return parse_excel_file(f.read())
+        elif file_type.lower() == "json":
+            with open(file_path, "rb") as f:
+                return parse_json_file(f.read())
         else:
             return {"error": f"Unsupported file type: {file_type}"}
     except Exception as e:
