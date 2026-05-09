@@ -111,16 +111,16 @@ export default function WellMap() {
 
   // ── Derived filter options ───────────────────────────────────────
   const fields  = useMemo(() => [...new Set(wells.map(w => w.field).filter(Boolean))],  [wells]);
-  const zones   = useMemo(() => [...new Set(wells.map(w => w.zone || w.region).filter(Boolean))], [wells]);
+  const states  = useMemo(() => [...new Set(wells.map(w => w.state || w.region).filter(Boolean))], [wells]);
 
   // ── Filtered wells ───────────────────────────────────────────────
   const filtered = useMemo(() => wells.filter(w => {
     const q = search.toLowerCase();
-    const matchSearch  = !q || (w.name || "").toLowerCase().includes(q) || (w.code || "").toLowerCase().includes(q) || (w.zone || w.region || "").toLowerCase().includes(q);
+    const matchSearch  = !q || (w.name || "").toLowerCase().includes(q) || (w.api || "").toLowerCase().includes(q) || (w.state || w.location || "").toLowerCase().includes(q);
     const matchField   = fieldFilter  === "all" || w.field  === fieldFilter;
-    const matchZone    = zoneFilter   === "all" || w.zone   === zoneFilter || w.region === zoneFilter;
+    const matchState   = zoneFilter   === "all" || w.state   === zoneFilter || w.region === zoneFilter;
     const matchStatus  = statusFilter === "all" || w.status === statusFilter;
-    return matchSearch && matchField && matchZone && matchStatus;
+    return matchSearch && matchField && matchState && matchStatus;
   }), [wells, search, fieldFilter, zoneFilter, statusFilter]);
 
   // ── Update markers on filter/selection change ────────────────────
@@ -217,7 +217,7 @@ export default function WellMap() {
           <div className="relative flex-1 min-w-[220px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="Rechercher par nom ou zone…"
+              placeholder="Rechercher par nom, API ou lieu…"
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="pl-9"
@@ -239,15 +239,15 @@ export default function WellMap() {
               {fields.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
             </SelectContent>
           </Select>
-          {/* Zone filter */}
+          {/* State filter */}
           <Select value={zoneFilter} onValueChange={setZoneFilter}>
             <SelectTrigger className="w-40">
               <Filter className="w-4 h-4 mr-2" />
-              <SelectValue placeholder="Zone" />
+              <SelectValue placeholder="État / Région" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Toutes les Zones</SelectItem>
-              {zones.map(z => <SelectItem key={String(z)} value={String(z)}>{String(z)}</SelectItem>)}
+              <SelectItem value="all">Tous les États</SelectItem>
+              {states.map(z => <SelectItem key={String(z)} value={String(z)}>{String(z)}</SelectItem>)}
             </SelectContent>
           </Select>
           {/* Clear filters */}
@@ -298,8 +298,8 @@ export default function WellMap() {
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="text-xl flex-shrink-0">📍</span>
                       <div className="min-w-0">
-                        <h2 className="font-bold text-gray-900 truncate">{selected.name || selected.code}</h2>
-                        <p className="text-xs text-gray-500">{selected.code}</p>
+                        <h2 className="font-bold text-gray-900 truncate">{selected.name}</h2>
+                        <p className="text-xs text-gray-500">API: {selected.api || "N/A"}</p>
                       </div>
                     </div>
                     <button onClick={() => setSelected(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition flex-shrink-0">
@@ -320,9 +320,9 @@ export default function WellMap() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {[
                     { icon: Layers,    label: "Champ",       value: selected.field || "—" },
-                    { icon: Filter,    label: "Zone / Région",value: selected.zone || selected.region || "—" },
-                    { icon: Ruler,     label: "Profondeur",   value: `${(selected.total_depth_m || selected.depth || 0).toLocaleString()} m` },
-                    { icon: Building2, label: "Opérateur",    value: selected.operator || "—" },
+                    { icon: Filter,    label: "État / Région",value: selected.state || selected.region || "—" },
+                    { icon: Ruler,     label: "Profondeur",   value: selected.start_depth !== undefined ? `${selected.start_depth} - ${selected.stop_depth} m` : "—" },
+                    { icon: Building2, label: "Compagnie",    value: selected.company || "—" },
                     { icon: MapPin,    label: "Coordonnées",  value: `${selected.latitude?.toFixed(4)}°N, ${selected.longitude?.toFixed(4)}°E` },
                   ].map(item => (
                     <div key={item.label} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100">

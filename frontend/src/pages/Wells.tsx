@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+// v1.0.1 - Project Status: Stable & LAS Standardized
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Search, Plus, Filter, ChevronRight, Droplets, Pencil, Trash2 } from "lucide-react";
+import { Search, Plus, Filter, ChevronRight, Droplets, Pencil, Trash2, Upload } from "lucide-react";
 import { motion } from "framer-motion";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,36 +23,26 @@ import {
 } from "@/components/ui/select";
 
 type Well = {
-  well_id: string;
-  id?: string;
+  id?: number;
+  well_id?: number;
   name: string;
-  code: string;
-  field: string;
-  zone?: string;
-  region?: string;
-  status: string;
-  total_depth_m: number;
-  depth?: number;
-  operator?: string;
+  api?: string;
+  field?: string;
+  location?: string;
+  county?: string;
+  state?: string;
+  country?: string;
+  company?: string;
+  service_company?: string;
+  date?: string;
+  start_depth?: number;
+  stop_depth?: number;
+  step?: number;
+  null_value?: number;
   latitude?: number;
   longitude?: number;
+  status: string;
   filesCount?: number;
-};
-
-const statusVariant: Record<string, string> = {
-  active: "bg-success/15 text-success border-success/30",
-  drilling: "bg-primary/15 text-primary border-primary/30",
-  completed: "bg-info/15 text-info border-info/30",
-  inactive: "bg-muted text-muted-foreground border-border",
-  maintenance: "bg-warning/15 text-warning border-warning/30",
-};
-
-const statusLabels: Record<string, string> = {
-  active: "Actif",
-  drilling: "Forage",
-  completed: "Complété",
-  inactive: "Inactif",
-  maintenance: "Maintenance",
 };
 
 function WellDialog({
@@ -65,50 +56,70 @@ function WellDialog({
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
 }) {
-  const [form, setForm] = useState({
-    name: "", code: "", field: "",
-    latitude: 0, longitude: 0,
-    region: "", depth: 0, operator: "", status: "active",
+  const [form, setForm] = useState<Partial<Well>>({
+    name: "", api: "", field: "", location: "", county: "", state: "", country: "",
+    company: "", service_company: "", date: "", start_depth: 0, stop_depth: 0,
+    step: 0, null_value: -999.25, latitude: 0, longitude: 0, status: "active",
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [isParsing, setIsParsing] = useState(false);
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (well && open) {
-      setForm({
-        name: well.name || "",
-        code: well.code || "",
-        field: well.field || "",
-        latitude: well.latitude || 0,
-        longitude: well.longitude || 0,
-        region: well.region || well.zone || "",
-        depth: well.depth || well.total_depth_m || 0,
-        operator: well.operator || "",
-        status: well.status || "active",
-      });
+      setForm({ ...well });
     } else if (open) {
       setForm({
-        name: "", code: "", field: "",
-        latitude: 0, longitude: 0,
-        region: "", depth: 0, operator: "", status: "active",
+        name: "", api: "", field: "", location: "", county: "", state: "", country: "",
+        company: "", service_company: "", date: "", start_depth: 0, stop_depth: 0,
+        step: 0, null_value: -999.25, latitude: 0, longitude: 0, status: "active",
       });
     }
   }, [well, open]);
 
+  const handleAutoFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    setIsParsing(true);
+    try {
+      const res = await api.post("/files/parse-metadata", formData, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
+      const metadata = res.data;
+      
+      setForm(prev => ({
+        ...prev,
+        ...metadata,
+        // Ensure name is always set if WELL is found
+        name: metadata.name || prev.name
+      }));
+      
+      toast({ title: "Extraction réussie", description: "Les champs ont été auto-remplis à partir du fichier LAS." });
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Erreur d'extraction",
+        description: error?.response?.data?.detail || "Impossible de lire le fichier LAS",
+      });
+    } finally {
+      setIsParsing(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   const handleSubmit = async () => {
     setIsLoading(true);
     try {
-      const payload = {
-        ...form,
-        total_depth_m: form.depth,
-        zone: form.region,
-      };
-
       if (well) {
-        await api.put(`/wells/${well.id || well.well_id}`, payload);
+        await api.put(`/wells/${well.id || well.well_id}`, form);
         toast({ title: "Puits modifié", description: "Mise à jour réussie" });
       } else {
-        await api.post("/wells/", payload);
+        await api.post("/wells/", form);
         toast({ title: "Puits créé", description: "Nouveau puits ajouté avec succès" });
       }
       onSuccess();
@@ -126,111 +137,144 @@ function WellDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader className="flex flex-row items-center justify-between pr-6">
           <DialogTitle>{well ? "Modifier le Puits" : "Ajouter un Nouveau Puits"}</DialogTitle>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="grid gap-2">
-            <Label>Nom du Puits *</Label>
-            <Input
-              placeholder="ex. Hassi Messaoud HMD-102"
-              value={form.name}
-              onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>Code *</Label>
-              <Input
-                placeholder="ex. HMD-102"
-                value={form.code}
-                onChange={e => setForm(p => ({ ...p, code: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Champ</Label>
-              <Input
-                placeholder="ex. Hassi Messaoud"
-                value={form.field}
-                onChange={e => setForm(p => ({ ...p, field: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>Latitude</Label>
-              <Input
-                type="number"
-                placeholder="ex. 31.68"
-                value={form.latitude || ""}
-                onChange={e => setForm(p => ({ ...p, latitude: +e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Longitude</Label>
-              <Input
-                type="number"
-                placeholder="ex. 6.07"
-                value={form.longitude || ""}
-                onChange={e => setForm(p => ({ ...p, longitude: +e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>Région / Zone</Label>
-              <Input
-                placeholder="ex. Ouargla"
-                value={form.region}
-                onChange={e => setForm(p => ({ ...p, region: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Profondeur (m)</Label>
-              <Input
-                type="number"
-                placeholder="ex. 3450"
-                value={form.depth || ""}
-                onChange={e => setForm(p => ({ ...p, depth: +e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>Opérateur</Label>
-              <Input
-                placeholder="ex. Sonatrach"
-                value={form.operator}
-                onChange={e => setForm(p => ({ ...p, operator: e.target.value }))}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Statut</Label>
-              <Select
-                value={form.status}
-                onValueChange={v => setForm(p => ({ ...p, status: v }))}
+          {!well && (
+            <>
+              <input type="file" accept=".las" className="hidden" ref={fileInputRef} onChange={handleAutoFill} />
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-2 text-primary border-primary/20 hover:bg-primary/5"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isParsing}
               >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Actif</SelectItem>
-                  <SelectItem value="drilling">Forage</SelectItem>
-                  <SelectItem value="completed">Complété</SelectItem>
-                  <SelectItem value="inactive">Inactif</SelectItem>
-                  <SelectItem value="maintenance">Maintenance</SelectItem>
-                </SelectContent>
-              </Select>
+                <Upload className="w-3.5 h-3.5" />
+                {isParsing ? "Analyse..." : "Auto-remplir (LAS)"}
+              </Button>
+            </>
+          )}
+        </DialogHeader>
+
+        <div className="grid gap-6 py-4">
+          {/* Section 1: Identification */}
+          <div className="space-y-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground border-b pb-1">Identification</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Nom du Puits (WELL) *</Label>
+                <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="ex. HMD-101" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Numéro API (API)</Label>
+                <Input value={form.api} onChange={e => setForm(p => ({ ...p, api: e.target.value }))} placeholder="ex. 123456789" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Champ (FLD)</Label>
+                <Input value={form.field} onChange={e => setForm(p => ({ ...p, field: e.target.value }))} placeholder="ex. Hassi Messaoud" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Statut</Label>
+                <Select value={form.status} onValueChange={v => setForm(p => ({ ...p, status: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Actif</SelectItem>
+                    <SelectItem value="drilling">Forage</SelectItem>
+                    <SelectItem value="completed">Complété</SelectItem>
+                    <SelectItem value="inactive">Inactif</SelectItem>
+                    <SelectItem value="maintenance">Maintenance</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 2: Localisation */}
+          <div className="space-y-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground border-b pb-1">Localisation</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Lieu (LOC)</Label>
+                <Input value={form.location} onChange={e => setForm(p => ({ ...p, location: e.target.value }))} placeholder="ex. Zone Nord" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Comté / Wilaya (CNTY)</Label>
+                <Input value={form.county} onChange={e => setForm(p => ({ ...p, county: e.target.value }))} placeholder="ex. Ouargla" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>État / Région (STAT)</Label>
+                <Input value={form.state} onChange={e => setForm(p => ({ ...p, state: e.target.value }))} placeholder="ex. Sahara" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Pays (CTRY)</Label>
+                <Input value={form.country} onChange={e => setForm(p => ({ ...p, country: e.target.value }))} placeholder="ex. Algérie" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Latitude (LATI)</Label>
+                <Input type="number" value={form.latitude} onChange={e => setForm(p => ({ ...p, latitude: +e.target.value }))} placeholder="31.68" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Longitude (LONG)</Label>
+                <Input type="number" value={form.longitude} onChange={e => setForm(p => ({ ...p, longitude: +e.target.value }))} placeholder="6.07" />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Opérations */}
+          <div className="space-y-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground border-b pb-1">Opérations & Log</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Compagnie (COMP)</Label>
+                <Input value={form.company} onChange={e => setForm(p => ({ ...p, company: e.target.value }))} placeholder="ex. Sonatrach" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Société de Service (SRVC)</Label>
+                <Input value={form.service_company} onChange={e => setForm(p => ({ ...p, service_company: e.target.value }))} placeholder="ex. Schlumberger" />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Date du Log (DATE)</Label>
+              <Input value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))} placeholder="ex. 15/05/2024" />
+            </div>
+          </div>
+
+          {/* Section 4: Paramètres Physiques */}
+          <div className="space-y-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground border-b pb-1">Paramètres du Puits</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Début Log (STRT)</Label>
+                <Input type="number" value={form.start_depth} onChange={e => setForm(p => ({ ...p, start_depth: +e.target.value }))} placeholder="0.0" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Fin Log (STOP)</Label>
+                <Input type="number" value={form.stop_depth} onChange={e => setForm(p => ({ ...p, stop_depth: +e.target.value }))} placeholder="3500.0" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>Pas (STEP)</Label>
+                <Input type="number" value={form.step} onChange={e => setForm(p => ({ ...p, step: +e.target.value }))} placeholder="0.1524" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Valeur Nulle (NULL)</Label>
+                <Input type="number" value={form.null_value} onChange={e => setForm(p => ({ ...p, null_value: +e.target.value }))} placeholder="-999.25" />
+              </div>
             </div>
           </div>
 
           <Button
-            className="w-full mt-2"
+            className="w-full mt-4"
             onClick={handleSubmit}
-            disabled={!form.name || !form.code || isLoading}
+            disabled={!form.name || isLoading}
           >
             {isLoading ? "En cours..." : (well ? "Enregistrer les modifications" : "Créer le Puits")}
           </Button>
@@ -240,15 +284,30 @@ function WellDialog({
   );
 }
 
+const statusVariant: Record<string, string> = {
+  active: "bg-success/15 text-success border-success/30",
+  drilling: "bg-primary/15 text-primary border-primary/30",
+  completed: "bg-info/15 text-info border-info/30",
+  inactive: "bg-muted text-muted-foreground border-border",
+  maintenance: "bg-warning/15 text-warning border-warning/30",
+};
+
+const statusLabels: Record<string, string> = {
+  active: "Actif",
+  drilling: "Forage",
+  completed: "Complété",
+  inactive: "Inactif",
+  maintenance: "Maintenance",
+};
+
 export default function Wells() {
   const [search, setSearch] = useState("");
   const [fieldFilter, setFieldFilter] = useState("all");
-  const [zoneFilter, setZoneFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [wellsList, setWellsList] = useState<Well[]>([]);
   const [wellDialog, setWellDialog] = useState<{ well: Well | null; open: boolean }>({ well: null, open: false });
   const [deletingWell, setDeletingWell] = useState<Well | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const { toast } = useToast();
   const { isAdmin } = useRole();
@@ -274,21 +333,21 @@ export default function Wells() {
   }, []);
 
   const fields = [...new Set(wellsList.map(w => w.field).filter(Boolean))];
-  const zones = [...new Set(wellsList.map(w => w.zone || w.region).filter(Boolean))];
 
   const filtered = wellsList.filter(w => {
+    const q = search.toLowerCase();
     const matchSearch =
-      (w.name?.toLowerCase() || "").includes(search.toLowerCase()) ||
-      (w.code?.toLowerCase() || "").includes(search.toLowerCase());
+      (w.name?.toLowerCase() || "").includes(q) ||
+      (w.api?.toLowerCase() || "").includes(q) ||
+      (w.field?.toLowerCase() || "").includes(q);
     const matchField = fieldFilter === "all" || w.field === fieldFilter;
-    const matchZone = zoneFilter === "all" || w.zone === zoneFilter || w.region === zoneFilter;
     const matchStatus = statusFilter === "all" || w.status === statusFilter;
-    return matchSearch && matchField && matchZone && matchStatus;
+    return matchSearch && matchField && matchStatus;
   });
 
   const handleDelete = async () => {
     if (!deletingWell) return;
-    setIsLoading(true);
+    setIsDeleting(true);
     try {
       await api.delete(`/wells/${deletingWell.id || deletingWell.well_id}`);
       setWellsList(prev => prev.filter(w =>
@@ -300,7 +359,7 @@ export default function Wells() {
       console.error("Erreur de suppression:", err);
       toast({ title: "Erreur", description: "Impossible de supprimer le puits", variant: "destructive" });
     } finally {
-      setIsLoading(false);
+      setIsDeleting(false);
     }
   };
 
@@ -317,12 +376,11 @@ export default function Wells() {
         </Button>
       </div>
 
-      {/* ── Filtres ── */}
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[250px] max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Rechercher des puits..."
+            placeholder="Rechercher par nom, API, champ..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="pl-9"
@@ -335,17 +393,7 @@ export default function Wells() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Tous les Champs</SelectItem>
-            {fields.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={zoneFilter} onValueChange={setZoneFilter}>
-          <SelectTrigger className="w-40">
-            <Filter className="w-4 h-4 mr-2" />
-            <SelectValue placeholder="Zone" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Toutes les Zones</SelectItem>
-            {zones.map(z => <SelectItem key={String(z)} value={String(z)}>{String(z)}</SelectItem>)}
+            {fields.map(f => <SelectItem key={f!} value={f!}>{f}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -355,101 +403,97 @@ export default function Wells() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Tous les Statuts</SelectItem>
-            <SelectItem value="active">Actif</SelectItem>
-            <SelectItem value="inactive">Inactif</SelectItem>
-            <SelectItem value="maintenance">Maintenance</SelectItem>
-            <SelectItem value="drilling">Forage</SelectItem>
-            <SelectItem value="completed">Complété</SelectItem>
+            {Object.entries(statusLabels).map(([key, label]) => (
+              <SelectItem key={key} value={key}>{label}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
 
-      {/* ── Tableau ── */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="glass-card rounded-xl overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border/50">
-              <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Puits</th>
-              <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Champ</th>
-              <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Région</th>
-              <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Statut</th>
-              <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Profondeur (m)</th>
-              <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Fichiers</th>
-              <th className="px-5 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="text-center py-6 text-muted-foreground">
-                  Aucun puits trouvé 🚫
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border/50 bg-muted/20">
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Puits (WELL)</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">API</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Champ (FLD)</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Région (STAT)</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Statut</th>
+                <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider px-5 py-3">Fichiers</th>
+                <th className="px-5 py-3 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actions</th>
               </tr>
-            ) : (
-              filtered.map((well, i) => (
-                <motion.tr
-                  key={well.well_id || well.id}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.03 }}
-                  className="border-b border-border/30 hover:bg-muted/50 transition-colors group"
-                >
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <Droplets className="w-4 h-4 text-primary" />
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-10 text-muted-foreground">
+                    Aucun puits trouvé
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((well, i) => (
+                  <motion.tr
+                    key={well.id || well.well_id}
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.02 }}
+                    className="border-b border-border/30 hover:bg-muted/30 transition-colors group"
+                  >
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                          <Droplets className="w-3.5 h-3.5 text-primary" />
+                        </div>
+                        <Link to={`/wells/${well.id || well.well_id}`} className="text-sm font-medium hover:text-primary transition-colors">
+                          {well.name}
+                        </Link>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-foreground">{well.name || well.code}</p>
-                        <p className="text-xs text-muted-foreground">{well.operator || "—"}</p>
+                    </td>
+                    <td className="px-5 py-3.5 text-sm text-muted-foreground">{well.api || "—"}</td>
+                    <td className="px-5 py-3.5 text-sm text-foreground">{well.field || "—"}</td>
+                    <td className="px-5 py-3.5 text-sm text-muted-foreground">{well.state || well.location || "—"}</td>
+                    <td className="px-5 py-3.5">
+                      <Badge variant="outline" className={statusVariant[well.status] || ""}>
+                        {statusLabels[well.status] || well.status}
+                      </Badge>
+                    </td>
+                    <td className="px-5 py-3.5 text-sm text-muted-foreground">{well.filesCount ?? 0}</td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center justify-end gap-1">
+                        {isAdmin && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setWellDialog({ well, open: true })}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <Pencil className="w-4 h-4 text-muted-foreground" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setDeletingWell(well)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-destructive"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </>
+                        )}
+                        <Link to={`/wells/${well.id || well.well_id}`}>
+                          <Button variant="ghost" size="sm">
+                            <ChevronRight className="w-4 h-4" />
+                          </Button>
+                        </Link>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5 text-sm text-foreground">{well.field || "—"}</td>
-                  <td className="px-5 py-3.5 text-sm text-muted-foreground">{well.zone || well.region || "—"}</td>
-                  <td className="px-5 py-3.5">
-                    <Badge variant="outline" className={statusVariant[well.status] || ""}>
-                      {statusLabels[well.status] || well.status}
-                    </Badge>
-                  </td>
-                  <td className="px-5 py-3.5 text-sm font-mono text-foreground">
-                    {(well.total_depth_m || well.depth || 0).toLocaleString()} m
-                  </td>
-                  <td className="px-5 py-3.5 text-sm text-muted-foreground">{well.filesCount ?? 0}</td>
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center justify-end gap-1">
-                      {isAdmin && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setWellDialog({ well, open: true })}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <Pencil className="w-4 h-4 text-muted-foreground" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setDeletingWell(well)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-destructive"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </>
-                      )}
-                      <Link to={`/wells/${well.well_id || well.id}`}>
-                        <Button variant="ghost" size="sm">
-                          <ChevronRight className="w-4 h-4" />
-                        </Button>
-                      </Link>
-                    </div>
-                  </td>
-                </motion.tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                    </td>
+                  </motion.tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </motion.div>
 
       <WellDialog
@@ -459,7 +503,6 @@ export default function Wells() {
         onSuccess={fetchWells}
       />
 
-      {/* ── Dialog حذف ── */}
       <AlertDialog open={!!deletingWell} onOpenChange={() => setDeletingWell(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -469,13 +512,13 @@ export default function Wells() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isLoading}>Annuler</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>Annuler</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
-              disabled={isLoading}
+              disabled={isDeleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {isLoading ? "Suppression..." : "Supprimer"}
+              {isDeleting ? "Suppression..." : "Supprimer"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

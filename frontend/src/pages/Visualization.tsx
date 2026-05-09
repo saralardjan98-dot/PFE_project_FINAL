@@ -14,13 +14,22 @@ interface CurveConfig {
 
 const CURVES_CONFIG: Record<string, CurveConfig> = {
   GR: { label: "Rayon Gamma", color: "hsl(142, 71%, 45%)", unit: "API", domain: [0, 150] },
-  RHOB: { label: "Densité", color: "hsl(25, 95%, 53%)", unit: "g/cc", domain: [1.95, 2.95] },
+  CGR: { label: "GR Corrigé", color: "hsl(142, 71%, 35%)", unit: "API", domain: [0, 150] },
+  RHOB: { label: "Densité", color: "hsl(0, 84%, 60%)", unit: "g/cc", domain: [1.95, 2.95] },
+  RHOZ: { label: "Densité Z", color: "hsl(0, 84%, 60%)", unit: "g/cc", domain: [1.95, 2.95] },
+  ZDEN: { label: "Densité Z", color: "hsl(0, 84%, 60%)", unit: "g/cc", domain: [1.95, 2.95] },
   NPHI: { label: "Porosité Neutron", color: "hsl(199, 89%, 48%)", unit: "v/v", domain: [-0.05, 0.45] },
+  CNPOR: { label: "Neutron", color: "hsl(199, 89%, 48%)", unit: "v/v", domain: [-0.05, 0.45] },
   DT: { label: "Sonique", color: "hsl(280, 65%, 60%)", unit: "μs/ft", domain: [40, 140] },
-  RT: { label: "Résistivité", color: "hsl(350, 80%, 55%)", unit: "Ω·m", domain: [0.2, 2000] },
-  CALI: { label: "Calibre", color: "hsl(38, 92%, 50%)", unit: "in", domain: [6, 16] },
-  NPOR: { label: "Porosité Neutron", color: "hsl(199, 89%, 48%)", unit: "v/v", domain: [-0.05, 0.45] },
-  PHIS: { label: "Porosité Sonique", color: "hsl(199, 89%, 48%)", unit: "v/v", domain: [-0.05, 0.45] },
+  DTCO: { label: "Sonique Comp.", color: "hsl(280, 65%, 60%)", unit: "μs/ft", domain: [40, 140] },
+  RT: { label: "Résistivité Profonde", color: "hsl(25, 95%, 53%)", unit: "Ω·m", domain: [0.2, 2000] },
+  ILD: { label: "Induction Profonde", color: "hsl(25, 95%, 53%)", unit: "Ω·m", domain: [0.2, 2000] },
+  LLD: { label: "Laterolog Profond", color: "hsl(25, 95%, 53%)", unit: "Ω·m", domain: [0.2, 2000] },
+  ILM: { label: "Induction Moyenne", color: "hsl(35, 90%, 60%)", unit: "Ω·m", domain: [0.2, 2000] },
+  LLS: { label: "Laterolog Superficiel", color: "hsl(35, 90%, 60%)", unit: "Ω·m", domain: [0.2, 2000] },
+  CALI: { label: "Calibre", color: "hsl(0, 0%, 50%)", unit: "in", domain: [6, 16] },
+  SP: { label: "Potentiel Spontané", color: "hsl(320, 70%, 50%)", unit: "mV", domain: [-100, 100] },
+  PEF: { label: "Effet Photoél.", color: "hsl(45, 100%, 50%)", unit: "b/e", domain: [0, 10] },
 };
 
 interface PointData {
@@ -112,8 +121,8 @@ export default function Visualization() {
             data = curveRes.data;
           } catch (e2: any) {
             if (e2.name === 'CanceledError' || e2.name === 'AbortError') return;
-            console.warn("No curve endpoint found, using mock data");
-            data = generateMockCurveData(curveNames, 100, 1200);
+            console.warn("No curve data found for this file");
+            data = [];
           }
         }
 
@@ -187,31 +196,6 @@ export default function Visualization() {
     fetchCurves();
     return () => controller.abort();
   }, [wellId, fileId]);
-
-  // ── Generate mock data if API fails ──
-  const generateMockCurveData = (
-    curves: string[],
-    points: number,
-    startDepth: number
-  ): PointData[] => {
-    const data: PointData[] = [];
-    for (let i = 0; i < points; i++) {
-      const depth = startDepth + i * 0.1;
-      const point: PointData = { depth };
-
-      curves.forEach((curve) => {
-        const config = CURVES_CONFIG[curve];
-        if (config && typeof config.domain[0] === 'number' && typeof config.domain[1] === 'number') {
-          const min = config.domain[0] as number;
-          const max = config.domain[1] as number;
-          point[curve] = min + Math.random() * (max - min);
-        }
-      });
-
-      data.push(point);
-    }
-    return data;
-  };
 
   const toggleCurve = (key: string) => {
     setSelectedCurves((prev) =>

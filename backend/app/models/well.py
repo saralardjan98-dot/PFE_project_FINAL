@@ -1,3 +1,4 @@
+# v1.0.1 - Project Status: Stable & LAS Standardized
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
@@ -9,19 +10,24 @@ class Well(Base):
     __tablename__ = "wells"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    code = Column(String, unique=True, index=True, nullable=False)
-    field = Column(String, nullable=True)           # champ pétrolier
-    zone = Column(String, nullable=True)            # region / zone
-    region = Column(String, nullable=True)          # alias for zone (frontend uses both)
-    operator = Column(String, nullable=True)
+    name = Column(String, nullable=False)           # WELL
+    api = Column(String, nullable=True)            # API
+    field = Column(String, nullable=True)           # FLD
+    location = Column(String, nullable=True)        # LOC
+    county = Column(String, nullable=True)          # CNTY
+    state = Column(String, nullable=True)           # STAT / Region
+    country = Column(String, nullable=True)         # CTRY
+    company = Column(String, nullable=True)         # COMP / Operator
+    service_company = Column(String, nullable=True) # SRVC
+    date = Column(String, nullable=True)            # DATE
+    start_depth = Column(Float, nullable=True)      # STRT
+    stop_depth = Column(Float, nullable=True)       # STOP
+    step = Column(Float, nullable=True)             # STEP
+    null_value = Column(Float, nullable=True)       # NULL
+    latitude = Column(Float, nullable=True)         # LATI
+    longitude = Column(Float, nullable=True)        # LONG
+    
     status = Column(String, default="active")       # active | drilling | completed | inactive
-    latitude = Column(Float, nullable=True)
-    longitude = Column(Float, nullable=True)
-    total_depth_m = Column(Float, nullable=True)    # profondeur totale en mètres
-    depth = Column(Float, nullable=True)            # alias used in edit form
-    start_date = Column(String, nullable=True)      # date de début (string for flexibility)
-    description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

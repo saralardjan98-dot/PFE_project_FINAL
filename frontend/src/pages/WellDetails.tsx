@@ -1,5 +1,5 @@
 import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, Upload, FileText, MapPin, Calendar, Ruler, Building2, Trash2, Download } from "lucide-react";
+import { ArrowLeft, Upload, FileText, MapPin, Calendar, Ruler, Building2, Trash2, Download, Layers, Activity, Droplets } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -103,11 +103,43 @@ export default function WellDetails() {
   if (loading) return <p className="text-muted-foreground p-8">Chargement...</p>;
   if (!well) return <p className="text-muted-foreground p-8">Puits introuvable</p>;
 
-  const infoItems = [
-    { icon: MapPin,     label: "Localisation", value: `${well.latitude}°N, ${well.longitude}°E` },
-    { icon: Building2,  label: "Opérateur",    value: well.operator },
-    { icon: Ruler,      label: "Profondeur",   value: `${well.depth?.toLocaleString()} m` },
-    { icon: Calendar,   label: "Date de Début",value: well.start_date },
+  const metadataSections = [
+    {
+      title: "Identification",
+      items: [
+        { icon: Droplets, label: "Nom (WELL)", value: well.name },
+        { icon: FileText, label: "API", value: well.api || "—" },
+        { icon: Layers,   label: "Champ (FLD)", value: well.field || "—" },
+        { icon: Activity, label: "Statut", value: statusLabels[well.status] || well.status },
+      ]
+    },
+    {
+      title: "Localisation",
+      items: [
+        { icon: MapPin,   label: "Lieu (LOC)", value: well.location || "—" },
+        { icon: MapPin,   label: "Comté (CNTY)", value: well.county || "—" },
+        { icon: MapPin,   label: "État (STAT)", value: well.state || "—" },
+        { icon: MapPin,   label: "Pays (CTRY)", value: well.country || "—" },
+        { icon: MapPin,   label: "Coordonnées", value: well.latitude ? `${well.latitude}°N, ${well.longitude}°E` : "—" },
+      ]
+    },
+    {
+      title: "Opérations",
+      items: [
+        { icon: Building2,label: "Compagnie", value: well.company || "—" },
+        { icon: Building2,label: "Service", value: well.service_company || "—" },
+        { icon: Calendar, label: "Date Log", value: well.date || "—" },
+      ]
+    },
+    {
+      title: "Paramètres Log",
+      items: [
+        { icon: Ruler,    label: "Début (STRT)", value: well.start_depth !== undefined ? `${well.start_depth} m` : "—" },
+        { icon: Ruler,    label: "Fin (STOP)", value: well.stop_depth !== undefined ? `${well.stop_depth} m` : "—" },
+        { icon: Ruler,    label: "Pas (STEP)", value: well.step !== undefined ? `${well.step} m` : "—" },
+        { icon: Activity, label: "Null (NULL)", value: well.null_value || "—" },
+      ]
+    }
   ];
 
   return (
@@ -123,7 +155,7 @@ export default function WellDetails() {
           <h1 className="text-2xl font-bold text-foreground">{well.name}</h1>
           <div className="flex items-center gap-2 mt-1">
             <span className="text-sm text-muted-foreground">
-              {well.field} — {well.region}
+              API: {well.api || "N/A"} • Champ: {well.field || "N/A"}
             </span>
             <Badge variant="outline" className={statusVariant[well.status]}>
               {statusLabels[well.status]}
@@ -132,21 +164,30 @@ export default function WellDetails() {
         </div>
       </div>
 
-      {/* Info cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {infoItems.map((item, i) => (
+      {/* Metadata sections */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {metadataSections.map((section, idx) => (
           <motion.div
-            key={item.label}
-            initial={{ opacity: 0, y: 15 }}
+            key={section.title}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
-            className="glass-card rounded-xl p-4"
+            transition={{ delay: idx * 0.1 }}
+            className="glass-card rounded-xl p-5"
           >
-            <div className="flex items-center gap-2 mb-2">
-              <item.icon className="w-4 h-4 text-primary" />
-              <span className="text-xs text-muted-foreground">{item.label}</span>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-4 border-b border-border/50 pb-2">
+              {section.title}
+            </h3>
+            <div className="grid grid-cols-2 gap-4">
+              {section.items.map((item, i) => (
+                <div key={item.label} className="space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <item.icon className="w-3.5 h-3.5 text-primary/70" />
+                    <span className="text-[10px] text-muted-foreground uppercase">{item.label}</span>
+                  </div>
+                  <p className="text-sm font-semibold text-foreground truncate">{item.value}</p>
+                </div>
+              ))}
             </div>
-            <p className="text-sm font-semibold text-foreground">{item.value}</p>
           </motion.div>
         ))}
       </div>

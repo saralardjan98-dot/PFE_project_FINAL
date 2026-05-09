@@ -64,31 +64,14 @@ def create_well(
 ):
     """
     Create a new well.
-    Frontend sends: { name, code, field, latitude, longitude }
-    Optionally: status, zone/region, operator, total_depth_m, start_date
+    Frontend sends all LAS metadata fields.
     """
-    # Check for duplicate code
-    if db.query(Well).filter(Well.code == well_in.code).first():
-        raise HTTPException(status_code=400, detail=f"Un puits avec le code '{well_in.code}' existe déjà")
-
-    # Mirror depth fields so both total_depth_m and depth are populated
-    depth = well_in.total_depth_m or well_in.depth
-    zone = well_in.zone or well_in.region
+    # Check for duplicate API if provided
+    if well_in.api and db.query(Well).filter(Well.api == well_in.api).first():
+        raise HTTPException(status_code=400, detail=f"Un puits avec l'API '{well_in.api}' existe déjà")
 
     new_well = Well(
-        name=well_in.name,
-        code=well_in.code,
-        field=well_in.field,
-        zone=zone,
-        region=zone,
-        operator=well_in.operator,
-        status=well_in.status or "active",
-        latitude=well_in.latitude,
-        longitude=well_in.longitude,
-        total_depth_m=depth,
-        depth=depth,
-        start_date=well_in.start_date,
-        description=well_in.description,
+        **well_in.model_dump(),
         created_by=current_user.id,
     )
     db.add(new_well)
@@ -121,25 +104,12 @@ def update_well(
 ):
     """
     Update a well's details.
-    Frontend (Wells.tsx handleSaveEdit) sends: { name, code, field, region, depth, status }
     """
     well = db.query(Well).filter(Well.id == well_id).first()
     if not well:
         raise HTTPException(status_code=404, detail="Puits introuvable")
 
     update_data = well_in.model_dump(exclude_unset=True)
-
-    # Keep depth fields in sync
-    if "depth" in update_data and "total_depth_m" not in update_data:
-        update_data["total_depth_m"] = update_data["depth"]
-    if "total_depth_m" in update_data and "depth" not in update_data:
-        update_data["depth"] = update_data["total_depth_m"]
-
-    # Keep zone/region in sync
-    if "region" in update_data and "zone" not in update_data:
-        update_data["zone"] = update_data["region"]
-    if "zone" in update_data and "region" not in update_data:
-        update_data["region"] = update_data["zone"]
 
     for field, value in update_data.items():
         setattr(well, field, value)

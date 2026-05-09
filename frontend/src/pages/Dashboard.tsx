@@ -75,7 +75,7 @@ export default function Dashboard() {
           activities.push({
             type: "well",
             action: `Nouveau puits ajouté: ${w.name}`,
-            detail: `${w.field} - ${w.region}`,
+            detail: `${w.field || "N/A"} - ${w.state || w.location || "N/A"}`,
             time: "Aujourd'hui",
           });
         });

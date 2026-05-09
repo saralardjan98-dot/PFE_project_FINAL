@@ -27,6 +27,36 @@ if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
 
+@router.post("/files/parse-metadata")
+def parse_file_metadata(
+    file: UploadFile = File(...),
+    current_user: UserOut = Depends(get_current_user),
+):
+    """
+    Parse a LAS file and return its metadata without saving.
+    Used for auto-filling the 'Add Well' form.
+    """
+    filename = file.filename or "unknown"
+    file_ext = filename.split(".")[-1].lower()
+    if file_ext != "las":
+        raise HTTPException(status_code=400, detail="Only LAS files are supported for auto-fill")
+
+    # Temporary save to parse
+    temp_path = f"temp_{datetime.now().timestamp()}_{filename}"
+    try:
+        with open(temp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        
+        parsed = parse_file(temp_path, "las")
+        if "error" in parsed:
+            raise HTTPException(status_code=400, detail=parsed["error"])
+        
+        return parsed.get("metadata", {})
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
 @router.post("/files/upload/{well_id}", response_model=WellFileOut)
 def upload_file(
     well_id: int,
@@ -35,18 +65,16 @@ def upload_file(
     current_user: UserOut = Depends(get_current_user),
 ):
     """
-    Upload LAS or CSV file to a well
+    Upload LAS or CSV file to a well.
+    If LAS, auto-populate empty well metadata.
     """
-    # ── Verify well exists ──
     well = db.query(Well).filter(Well.id == well_id).first()
     if not well:
         raise HTTPException(status_code=404, detail="Well not found")
 
-    # ── Check access (admin or owner) ──
     if well.created_by != current_user.id and current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # ── Validate file type ──
     filename = file.filename or "unknown"
     file_ext = filename.split(".")[-1].lower()
     if file_ext not in ["las", "csv", "xlsx", "xls", "json"]:
@@ -55,7 +83,6 @@ def upload_file(
             detail="Only .las, .csv, .xlsx, and .json files are supported"
         )
 
-    # ── Save file ──
     file_path = os.path.join(UPLOAD_DIR, f"{well_id}_{datetime.now().timestamp()}_{filename}")
     try:
         with open(file_path, "wb") as f:
@@ -63,16 +90,19 @@ def upload_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
-    # ── Parse file to extract curves ──
     parsed = parse_file(file_path, file_ext)
     
-    if parsed.get("error"):
-        # Still save the file but mark the error
-        curves = []
-    else:
+    curves = []
+    if not parsed.get("error"):
         curves = parsed.get("curves", [])
+        # Auto-populate well metadata if LAS
+        if file_ext == "las" and "metadata" in parsed:
+            metadata = parsed["metadata"]
+            for field, value in metadata.items():
+                if hasattr(well, field) and getattr(well, field) is None and value is not None:
+                    setattr(well, field, value)
+            db.commit()
 
-    # ── Save to database ──
     db_file = WellFile(
         well_id=well_id,
         name=filename,

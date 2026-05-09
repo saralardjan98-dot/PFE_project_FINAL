@@ -67,49 +67,102 @@ def _parse_las_sections(content: str) -> Dict[str, Any]:
 
 
 def parse_las_file(file_path: str) -> dict:
-    """Parse LAS file and extract curves"""
+    """Parse LAS file and extract curves and metadata"""
     try:
         import lasio
         
         las = lasio.read(file_path)
         
+        # ── Extract metadata ──
+        metadata = {}
+        mapping = {
+            "WELL": "name",
+            "API": "api",
+            "FLD": "field",
+            "LOC": "location",
+            "CNTY": "county",
+            "STAT": "state",
+            "CTRY": "country",
+            "COMP": "company",
+            "SRVC": "service_company",
+            "DATE": "date",
+            "STRT": "start_depth",
+            "STOP": "stop_depth",
+            "STEP": "step",
+            "NULL": "null_value",
+            "LATI": "latitude",
+            "LONG": "longitude",
+        }
+        
+        for mnemonic, field_name in mapping.items():
+            if mnemonic in las.well:
+                val = las.well[mnemonic].value
+                # Try to convert numeric fields
+                if field_name in ["start_depth", "stop_depth", "step", "null_value", "latitude", "longitude"]:
+                    try:
+                        metadata[field_name] = float(val)
+                    except:
+                        metadata[field_name] = None
+                else:
+                    metadata[field_name] = str(val) if val is not None else None
+
         # ── Extract curves ──
         curves = []
         for curve in las.curves:
-            curves.append(curve.mnemonic)
+            curves.append({
+                "mnemonic": curve.mnemonic,
+                "unit": curve.unit,
+                "description": curve.descr,
+                "value": "" # placeholder if needed
+            })
         
         # ── Extract data ──
         df = las.df()
         
-        # Reset index to include depth
+        # Reset index to include depth (usually the index in lasio)
+        # Handle cases where depth might not be the index
         data = []
+        curve_mnemonics = [c["mnemonic"] for c in curves]
+        
+        # las.df() returns a dataframe with mnemonics as columns
+        # The index is usually the first curve (depth)
+        depth_mnemonic = las.curves[0].mnemonic
+        
         for depth, row in df.iterrows():
             point = {"depth": float(depth)}
-            for curve in curves:
+            for m in curve_mnemonics:
+                if m == depth_mnemonic: continue
                 try:
-                    point[curve] = float(row[curve]) if pd.notna(row[curve]) else None
+                    val = row[m]
+                    point[m] = float(val) if pd.notna(val) else None
                 except:
-                    pass
+                    point[m] = None
             data.append(point)
         
         return {
+            "metadata": metadata,
             "curves": curves,
+            "curve_mnemonics": curve_mnemonics,
             "data": data,
-            "total_points": len(data)
+            "total_points": len(data),
+            "depth_range": {
+                "min": float(las.well.STRT.value) if "STRT" in las.well else None,
+                "max": float(las.well.STOP.value) if "STOP" in las.well else None,
+                "step": float(las.well.STEP.value) if "STEP" in las.well else None,
+            }
         }
     
     except Exception as e:
         print(f"LAS parsing error: {e}")
-        # Fallback: return empty but valid
-        return {"curves": [], "data": [], "total_points": 0}
+        return {"metadata": {}, "curves": [], "data": [], "total_points": 0}
+
+# ─────────────────────────── CSV Parser ────────────────────────────
 
 # ─────────────────────────── CSV Parser ────────────────────────────
 
 def parse_csv_file(file_bytes: bytes) -> Dict[str, Any]:
     """
     Parse CSV petrophysical file.
-    Assumes first row = headers, first column = depth.
-    Returns same structure as parse_las_file for consistency.
     """
     try:
         df = pd.read_csv(io.BytesIO(file_bytes))
@@ -120,22 +173,30 @@ def parse_csv_file(file_bytes: bytes) -> Dict[str, Any]:
         raise ValueError("Le fichier CSV est vide")
 
     columns = list(df.columns)
-    curves = [{"name": col, "unit": ""} for col in columns]
-
-    # First column is assumed to be depth
-    depth_col = columns[0]
-    depths = df[depth_col].dropna().tolist()
-
-    data: Dict[str, list] = {}
+    # Find depth column
+    depth_col = next((col for col in columns if col.lower() in ["depth", "dept", "prof", "profondeur"]), columns[0])
+    
+    curves = []
     for col in columns:
-        data[col] = [None if pd.isna(v) else float(v) for v in df[col]]
+        curves.append({"mnemonic": col, "unit": "", "description": ""})
+
+    data = []
+    for _, row in df.iterrows():
+        point = {"depth": float(row[depth_col]) if pd.notna(row[depth_col]) else 0}
+        for col in columns:
+            if col == depth_col: continue
+            val = row[col]
+            point[col] = float(val) if pd.notna(val) else None
+        data.append(point)
+
+    depths = [p["depth"] for p in data]
 
     return {
-        "well_name": None,
+        "metadata": {},
         "curves": curves,
+        "data": data,
         "depth_min": min(depths) if depths else None,
         "depth_max": max(depths) if depths else None,
-        "data": data,
     }
 
 
@@ -144,7 +205,6 @@ def parse_csv_file(file_bytes: bytes) -> Dict[str, Any]:
 def parse_excel_file(file_bytes: bytes) -> Dict[str, Any]:
     """
     Parse Excel petrophysical file.
-    Assumes first row = headers, first column = depth.
     """
     try:
         df = pd.read_excel(io.BytesIO(file_bytes))
@@ -155,22 +215,27 @@ def parse_excel_file(file_bytes: bytes) -> Dict[str, Any]:
         raise ValueError("Le fichier Excel est vide")
 
     columns = list(df.columns)
-    curves = [{"name": col, "unit": ""} for col in columns]
+    depth_col = next((col for col in columns if col.lower() in ["depth", "dept", "prof", "profondeur"]), columns[0])
+    
+    curves = [{"mnemonic": col, "unit": "", "description": ""} for col in columns]
 
-    # First column is assumed to be depth
-    depth_col = columns[0]
-    depths = df[depth_col].dropna().tolist()
+    data = []
+    for _, row in df.iterrows():
+        point = {"depth": float(row[depth_col]) if pd.notna(row[depth_col]) else 0}
+        for col in columns:
+            if col == depth_col: continue
+            val = row[col]
+            point[col] = float(val) if pd.notna(val) else None
+        data.append(point)
 
-    data: Dict[str, list] = {}
-    for col in columns:
-        data[col] = [None if pd.isna(v) else float(v) for v in df[col]]
+    depths = [p["depth"] for p in data]
 
     return {
-        "well_name": None,
+        "metadata": {},
         "curves": curves,
+        "data": data,
         "depth_min": min(depths) if depths else None,
         "depth_max": max(depths) if depths else None,
-        "data": data,
     }
 
 
@@ -195,22 +260,27 @@ def parse_json_file(file_bytes: bytes) -> Dict[str, Any]:
         raise ValueError("Le fichier JSON est vide")
 
     columns = list(df.columns)
-    curves = [{"name": col, "unit": ""} for col in columns]
+    depth_col = next((col for col in columns if col.lower() in ["depth", "dept", "prof", "profondeur"]), columns[0])
+    
+    curves = [{"mnemonic": col, "unit": "", "description": ""} for col in columns]
 
-    # Find depth column
-    depth_col = next((col for col in columns if col.lower() in ["depth", "dept"]), columns[0])
-    depths = df[depth_col].dropna().tolist()
+    data = []
+    for _, row in df.iterrows():
+        point = {"depth": float(row[depth_col]) if pd.notna(row[depth_col]) else 0}
+        for col in columns:
+            if col == depth_col: continue
+            val = row[col]
+            point[col] = float(val) if pd.notna(val) else None
+        data.append(point)
 
-    data: Dict[str, list] = {}
-    for col in columns:
-        data[col] = [None if pd.isna(v) else float(v) for v in df[col]]
+    depths = [p["depth"] for p in data]
 
     return {
-        "well_name": None,
+        "metadata": {},
         "curves": curves,
+        "data": data,
         "depth_min": min(depths) if depths else None,
         "depth_max": max(depths) if depths else None,
-        "data": data,
     }
 
 
@@ -222,58 +292,43 @@ def get_curve_data_from_file(
     curve_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Read a stored LAS/CSV file and return its curve data,
-    optionally filtered to a single curve.
-    Returns: {depth_key, curves, points: [{depth, <curve>: value, ...}]}
+    Read a stored LAS/CSV file and return its curve data.
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Fichier introuvable: {file_path}")
 
-    with open(file_path, "rb") as f:
-        raw = f.read()
-
-    if file_type.upper() == "LAS":
-        parsed = parse_las_file(file_path)
-    elif file_type.upper() == "CSV":
-        parsed = parse_csv_file(raw)
-    elif file_type.upper() in ["XLSX", "XLS"]:
-        parsed = parse_excel_file(raw)
-    elif file_type.upper() == "JSON":
-        parsed = parse_json_file(raw)
-    else:
-        raise ValueError(f"Unsupported file type: {file_type}")
+    parsed = parse_file(file_path, file_type.lower())
+    if "error" in parsed:
+        return {"curves": [], "points": [], "error": parsed["error"]}
 
     curve_defs = parsed["curves"]
-    data = parsed["data"]
+    points = parsed["data"]
 
     if not curve_defs:
         return {"curves": [], "points": []}
 
-    depth_key = curve_defs[0]["name"]
+    # Depth key is usually the first mnemonic or 'depth'
+    depth_key = "depth"
 
     # Select curves to return
     if curve_name:
-        selected = [curve_name] if curve_name in data else []
+        # Check if the curve exists in the data points
+        selected = [curve_name] if points and curve_name in points[0] else []
     else:
-        selected = [c["name"] for c in curve_defs[1:]]  # all except depth
+        # All except depth
+        selected = [c["mnemonic"] for c in curve_defs if c["mnemonic"].lower() not in ["depth", "dept", "prof", "profondeur"]]
 
-    depths = data.get(depth_key, [])
-    points = []
-    for i, d in enumerate(depths):
-        if d is None:
-            continue
-        point: Dict[str, Any] = {"depth": d}
-        for cn in selected:
-            vals = data.get(cn, [])
-            point[cn] = vals[i] if i < len(vals) else None
-        points.append(point)
+    # Calculate min/max if not provided
+    depths = [p["depth"] for p in points]
+    depth_min = parsed.get("depth_min") or (min(depths) if depths else 0)
+    depth_max = parsed.get("depth_max") or (max(depths) if depths else 0)
 
     return {
         "depth_key": depth_key,
         "curves": curve_defs,
         "selected_curves": selected,
-        "depth_min": parsed["depth_min"],
-        "depth_max": parsed["depth_max"],
+        "depth_min": depth_min,
+        "depth_max": depth_max,
         "points": points,
     }
 

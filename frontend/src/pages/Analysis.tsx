@@ -47,9 +47,9 @@ export default function Analysis() {
           return {
             id: result?.id || `well-${wellId}`,
             well_id: wellId,
-            wellName: well.name || well.code || "Inconnu",
+            wellName: well.name || "Inconnu",
             field: well.field || "",
-            zone: well.zone || well.region || "",
+            state: well.state || "",
             porosity: result?.porosity ?? null,
             waterSaturation: result?.water_saturation ?? null,
             permeability: result?.permeability ?? null,
