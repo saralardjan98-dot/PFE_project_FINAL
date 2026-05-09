@@ -10,7 +10,7 @@ Frontend calls (Analysis.tsx, WellDetails.tsx):
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from sqlalchemy.orm import Session
 
 from app.database.session import get_db
@@ -128,3 +128,76 @@ def get_well_analysis(
         .order_by(AnalysisResult.created_at.desc())
         .all()
     )
+
+
+# ─────────────── POST /analysis/import ───────────────
+@router.post("/import", status_code=201)
+def import_analysis(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Bulk-import analysis results from a CSV or JSON file.
+    CSV expected columns: well_id, porosity, water_saturation, permeability,
+                          net_pay, shale_volume, depth_top, depth_bottom, notes
+    JSON: list of objects with same keys.
+    Returns {imported: N, errors: [...]}
+    """
+    import io, csv, json as _json
+
+    content = file.file.read()
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+
+    rows = []
+    parse_error = None
+    try:
+        if ext == "csv":
+            reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig")))
+            rows = list(reader)
+        elif ext == "json":
+            parsed = _json.loads(content)
+            rows = parsed if isinstance(parsed, list) else parsed.get("data", [parsed])
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV or JSON files are supported")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Parse error: {str(e)}")
+
+    FLOAT_FIELDS = [
+        "porosity", "water_saturation", "permeability",
+        "net_pay", "shale_volume", "hydrocarbon_saturation",
+        "depth_top", "depth_bottom",
+    ]
+    imported = 0
+    errors = []
+
+    for i, row in enumerate(rows):
+        try:
+            well_id = int(row.get("well_id", 0))
+            if not well_id:
+                errors.append(f"Row {i+1}: missing well_id")
+                continue
+            well = db.query(Well).filter(Well.id == well_id).first()
+            if not well:
+                errors.append(f"Row {i+1}: well_id={well_id} not found")
+                continue
+
+            data = {"well_id": well_id}
+            for f in FLOAT_FIELDS:
+                val = row.get(f)
+                if val not in (None, "", "null"):
+                    try:
+                        data[f] = float(val)
+                    except ValueError:
+                        errors.append(f"Row {i+1}: invalid value for {f}={val!r}")
+            data["notes"] = row.get("notes", "")
+            data["analysis_type"] = row.get("analysis_type", "petrophysical")
+
+            db.add(AnalysisResult(**data))
+            imported += 1
+        except Exception as e:
+            errors.append(f"Row {i+1}: {str(e)}")
+
+    db.commit()
+    return {"imported": imported, "errors": errors}
+

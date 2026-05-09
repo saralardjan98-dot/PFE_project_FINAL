@@ -33,6 +33,8 @@ type Well = {
   total_depth_m: number;
   depth?: number;
   operator?: string;
+  latitude?: number;
+  longitude?: number;
   filesCount?: number;
 };
 
@@ -52,44 +54,223 @@ const statusLabels: Record<string, string> = {
   maintenance: "Maintenance",
 };
 
+function WellDialog({
+  well,
+  open,
+  onOpenChange,
+  onSuccess
+}: {
+  well?: Well | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSuccess: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: "", code: "", field: "",
+    latitude: 0, longitude: 0,
+    region: "", depth: 0, operator: "", status: "active",
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (well && open) {
+      setForm({
+        name: well.name || "",
+        code: well.code || "",
+        field: well.field || "",
+        latitude: well.latitude || 0,
+        longitude: well.longitude || 0,
+        region: well.region || well.zone || "",
+        depth: well.depth || well.total_depth_m || 0,
+        operator: well.operator || "",
+        status: well.status || "active",
+      });
+    } else if (open) {
+      setForm({
+        name: "", code: "", field: "",
+        latitude: 0, longitude: 0,
+        region: "", depth: 0, operator: "", status: "active",
+      });
+    }
+  }, [well, open]);
+
+  const handleSubmit = async () => {
+    setIsLoading(true);
+    try {
+      const payload = {
+        ...form,
+        total_depth_m: form.depth,
+        zone: form.region,
+      };
+
+      if (well) {
+        await api.put(`/wells/${well.id || well.well_id}`, payload);
+        toast({ title: "Puits modifié", description: "Mise à jour réussie" });
+      } else {
+        await api.post("/wells/", payload);
+        toast({ title: "Puits créé", description: "Nouveau puits ajouté avec succès" });
+      }
+      onSuccess();
+      onOpenChange(false);
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Erreur",
+        description: error?.response?.data?.detail || "Opération échouée",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{well ? "Modifier le Puits" : "Ajouter un Nouveau Puits"}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="grid gap-2">
+            <Label>Nom du Puits *</Label>
+            <Input
+              placeholder="ex. Hassi Messaoud HMD-102"
+              value={form.name}
+              onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label>Code *</Label>
+              <Input
+                placeholder="ex. HMD-102"
+                value={form.code}
+                onChange={e => setForm(p => ({ ...p, code: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Champ</Label>
+              <Input
+                placeholder="ex. Hassi Messaoud"
+                value={form.field}
+                onChange={e => setForm(p => ({ ...p, field: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label>Latitude</Label>
+              <Input
+                type="number"
+                placeholder="ex. 31.68"
+                value={form.latitude || ""}
+                onChange={e => setForm(p => ({ ...p, latitude: +e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Longitude</Label>
+              <Input
+                type="number"
+                placeholder="ex. 6.07"
+                value={form.longitude || ""}
+                onChange={e => setForm(p => ({ ...p, longitude: +e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label>Région / Zone</Label>
+              <Input
+                placeholder="ex. Ouargla"
+                value={form.region}
+                onChange={e => setForm(p => ({ ...p, region: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Profondeur (m)</Label>
+              <Input
+                type="number"
+                placeholder="ex. 3450"
+                value={form.depth || ""}
+                onChange={e => setForm(p => ({ ...p, depth: +e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label>Opérateur</Label>
+              <Input
+                placeholder="ex. Sonatrach"
+                value={form.operator}
+                onChange={e => setForm(p => ({ ...p, operator: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Statut</Label>
+              <Select
+                value={form.status}
+                onValueChange={v => setForm(p => ({ ...p, status: v }))}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Actif</SelectItem>
+                  <SelectItem value="drilling">Forage</SelectItem>
+                  <SelectItem value="completed">Complété</SelectItem>
+                  <SelectItem value="inactive">Inactif</SelectItem>
+                  <SelectItem value="maintenance">Maintenance</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <Button
+            className="w-full mt-2"
+            onClick={handleSubmit}
+            disabled={!form.name || !form.code || isLoading}
+          >
+            {isLoading ? "En cours..." : (well ? "Enregistrer les modifications" : "Créer le Puits")}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function Wells() {
   const [search, setSearch] = useState("");
   const [fieldFilter, setFieldFilter] = useState("all");
   const [zoneFilter, setZoneFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [wellsList, setWellsList] = useState<Well[]>([]);
-  const [editingWell, setEditingWell] = useState<Well | null>(null);
+  const [wellDialog, setWellDialog] = useState<{ well: Well | null; open: boolean }>({ well: null, open: false });
   const [deletingWell, setDeletingWell] = useState<Well | null>(null);
-  const [editForm, setEditForm] = useState({
-    name: "", code: "", field: "", region: "", depth: 0, status: "active" as string,
-  });
-  const [addForm, setAddForm] = useState({
-    name: "", code: "", field: "",
-    latitude: 0, longitude: 0,
-    region: "", depth: 0, operator: "", status: "active",
-  });
-  const [addOpen, setAddOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const { toast } = useToast();
   const { isAdmin } = useRole();
 
-  // ── جلب قائمة الپوئيات ──
+  const fetchWells = async () => {
+    try {
+      const res = await api.get("/wells");
+      let data = [];
+      if (Array.isArray(res.data)) {
+        data = res.data;
+      } else if (res.data && Array.isArray(res.data.items)) {
+        data = res.data.items;
+      }
+      setWellsList(data);
+    } catch (err) {
+      console.error("Erreur:", err);
+      toast({ title: "Erreur", description: "Impossible de charger les puits", variant: "destructive" });
+    }
+  };
+
   useEffect(() => {
-    api.get("/wells")
-      .then(res => {
-        let data = [];
-        if (Array.isArray(res.data)) {
-          data = res.data;
-        } else if (res.data && Array.isArray(res.data.items)) {
-          data = res.data.items;
-        }
-        setWellsList(data);
-      })
-      .catch(err => {
-        console.error("Erreur:", err);
-        toast({ title: "Erreur", description: "Impossible de charger les puits", variant: "destructive" });
-      });
+    fetchWells();
   }, []);
 
   const fields = [...new Set(wellsList.map(w => w.field).filter(Boolean))];
@@ -105,39 +286,6 @@ export default function Wells() {
     return matchSearch && matchField && matchZone && matchStatus;
   });
 
-  // ── تعديل پوئي ──
-  const handleEdit = (well: Well) => {
-    setEditForm({
-      name: well.name,
-      code: well.code,
-      field: well.field,
-      region: well.region || well.zone || "",
-      depth: well.depth || well.total_depth_m || 0,
-      status: well.status,
-    });
-    setEditingWell(well);
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editingWell) return;
-    setIsLoading(true);
-    try {
-      const res = await api.put(`/wells/${editingWell.id || editingWell.well_id}`, editForm);
-      const updated = res.data;
-      setWellsList(prev => prev.map(w =>
-        (w.id === updated.id || w.well_id === updated.well_id) ? updated : w
-      ));
-      toast({ title: "Puits modifié", description: `${updated.name} mis à jour avec succès` });
-      setEditingWell(null);
-    } catch (err) {
-      console.error("Erreur de modification:", err);
-      toast({ title: "Erreur", description: "Impossible de modifier le puits", variant: "destructive" });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // ── حذف پوئي ──
   const handleDelete = async () => {
     if (!deletingWell) return;
     setIsLoading(true);
@@ -156,45 +304,6 @@ export default function Wells() {
     }
   };
 
-  // ── إضافة پوئي ──
-  const handleAdd = async () => {
-    setIsLoading(true);
-    try {
-      await createWell({
-        ...addForm,
-        total_depth_m: addForm.depth,
-        zone: addForm.region,
-      });
-      toast({ title: "Succès", description: "Le puits a été créé avec succès !" });
-      setAddOpen(false);
-
-      // تحديث القائمة
-      const res = await api.get("/wells");
-      let data = [];
-      if (Array.isArray(res.data)) {
-        data = res.data;
-      } else if (res.data && Array.isArray(res.data.items)) {
-        data = res.data.items;
-      }
-      setWellsList(data);
-
-      // reset الفورم
-      setAddForm({
-        name: "", code: "", field: "",
-        latitude: 0, longitude: 0,
-        region: "", depth: 0, operator: "", status: "active",
-      });
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Erreur",
-        description: error?.response?.data?.detail || "Impossible de créer le puits",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -203,130 +312,9 @@ export default function Wells() {
           <p className="text-sm text-muted-foreground">{wellsList.length} puits enregistrés</p>
         </div>
 
-        {/* ── Dialog إضافة پوئي ── */}
-        <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2">
-              <Plus className="w-4 h-4" /> Ajouter un Puits
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Ajouter un Nouveau Puits</DialogTitle>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-
-              {/* Nom */}
-              <div className="grid gap-2">
-                <Label>Nom du Puits *</Label>
-                <Input
-                  placeholder="ex. Hassi Messaoud HMD-102"
-                  value={addForm.name}
-                  onChange={e => setAddForm(p => ({ ...p, name: e.target.value }))}
-                />
-              </div>
-
-              {/* Code + Champ */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Code *</Label>
-                  <Input
-                    placeholder="ex. HMD-102"
-                    value={addForm.code}
-                    onChange={e => setAddForm(p => ({ ...p, code: e.target.value }))}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Champ</Label>
-                  <Input
-                    placeholder="ex. Hassi Messaoud"
-                    value={addForm.field}
-                    onChange={e => setAddForm(p => ({ ...p, field: e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              {/* Latitude + Longitude */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Latitude *</Label>
-                  <Input
-                    type="number"
-                    placeholder="ex. 31.68"
-                    value={addForm.latitude || ""}
-                    onChange={e => setAddForm(p => ({ ...p, latitude: +e.target.value }))}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Longitude *</Label>
-                  <Input
-                    type="number"
-                    placeholder="ex. 6.07"
-                    value={addForm.longitude || ""}
-                    onChange={e => setAddForm(p => ({ ...p, longitude: +e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              {/* Région + Profondeur */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Région / Zone</Label>
-                  <Input
-                    placeholder="ex. Ouargla"
-                    value={addForm.region}
-                    onChange={e => setAddForm(p => ({ ...p, region: e.target.value }))}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Profondeur (m)</Label>
-                  <Input
-                    type="number"
-                    placeholder="ex. 3450"
-                    value={addForm.depth || ""}
-                    onChange={e => setAddForm(p => ({ ...p, depth: +e.target.value }))}
-                  />
-                </div>
-              </div>
-
-              {/* Opérateur + Statut */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Opérateur</Label>
-                  <Input
-                    placeholder="ex. Sonatrach"
-                    value={addForm.operator}
-                    onChange={e => setAddForm(p => ({ ...p, operator: e.target.value }))}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Statut</Label>
-                  <Select
-                    value={addForm.status}
-                    onValueChange={v => setAddForm(p => ({ ...p, status: v }))}
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="active">Actif</SelectItem>
-                      <SelectItem value="drilling">Forage</SelectItem>
-                      <SelectItem value="completed">Complété</SelectItem>
-                      <SelectItem value="inactive">Inactif</SelectItem>
-                      <SelectItem value="maintenance">Maintenance</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <Button
-                className="w-full mt-2"
-                onClick={handleAdd}
-                disabled={!addForm.name || !addForm.code || isLoading}
-              >
-                {isLoading ? "En cours..." : "Créer le Puits"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <Button className="gap-2" onClick={() => setWellDialog({ well: null, open: true })}>
+          <Plus className="w-4 h-4" /> Ajouter un Puits
+        </Button>
       </div>
 
       {/* ── Filtres ── */}
@@ -435,7 +423,7 @@ export default function Wells() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleEdit(well)}
+                            onClick={() => setWellDialog({ well, open: true })}
                             className="opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             <Pencil className="w-4 h-4 text-muted-foreground" />
@@ -464,77 +452,12 @@ export default function Wells() {
         </table>
       </motion.div>
 
-      {/* ── Dialog تعديل ── */}
-      <Dialog open={!!editingWell} onOpenChange={() => setEditingWell(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Modifier le Puits</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label>Nom</Label>
-              <Input
-                value={editForm.name}
-                onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Code</Label>
-                <Input
-                  value={editForm.code}
-                  onChange={e => setEditForm(p => ({ ...p, code: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Champ</Label>
-                <Input
-                  value={editForm.field}
-                  onChange={e => setEditForm(p => ({ ...p, field: e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label>Région</Label>
-                <Input
-                  value={editForm.region}
-                  onChange={e => setEditForm(p => ({ ...p, region: e.target.value }))}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Profondeur (m)</Label>
-                <Input
-                  type="number"
-                  value={editForm.depth}
-                  onChange={e => setEditForm(p => ({ ...p, depth: +e.target.value }))}
-                />
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label>Statut</Label>
-              <Select value={editForm.status} onValueChange={v => setEditForm(p => ({ ...p, status: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Actif</SelectItem>
-                  <SelectItem value="drilling">Forage</SelectItem>
-                  <SelectItem value="completed">Complété</SelectItem>
-                  <SelectItem value="inactive">Inactif</SelectItem>
-                  <SelectItem value="maintenance">Maintenance</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingWell(null)} disabled={isLoading}>
-              Annuler
-            </Button>
-            <Button onClick={handleSaveEdit} disabled={isLoading}>
-              {isLoading ? "En cours..." : "Enregistrer"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <WellDialog
+        well={wellDialog.well}
+        open={wellDialog.open}
+        onOpenChange={(open) => setWellDialog(p => ({ ...p, open }))}
+        onSuccess={fetchWells}
+      />
 
       {/* ── Dialog حذف ── */}
       <AlertDialog open={!!deletingWell} onOpenChange={() => setDeletingWell(null)}>

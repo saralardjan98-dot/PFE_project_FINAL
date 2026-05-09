@@ -1,59 +1,91 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import L from "leaflet";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Filter } from "lucide-react";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Search, Filter, X, MapPin, Ruler, Building2, Layers, Droplets, ChevronRight } from "lucide-react";
 import api from "@/services/api";
 import "leaflet/dist/leaflet.css";
 
-const statusVariant: Record<string, string> = {
-  active: "#22c55e",
-  drilling: "#f97316",
-  completed: "#0ea5e9",
-  inactive: "#6b7280",
+// ── Status colours & labels ──────────────────────────────────────────
+const STATUS_COLOR: Record<string, string> = {
+  active:      "#22c55e",
+  drilling:    "#f97316",
+  completed:   "#0ea5e9",
+  inactive:    "#6b7280",
+  maintenance: "#eab308",
+};
+const STATUS_LABEL: Record<string, string> = {
+  active:      "Actif",
+  drilling:    "Forage",
+  completed:   "Complété",
+  inactive:    "Inactif",
+  maintenance: "Maintenance",
 };
 
-const statusLabels: Record<string, string> = {
-  active: "Actif",
-  drilling: "Forage",
-  completed: "Complété",
-  inactive: "Inactif",
-};
+// ── Red Google-Maps-style pin icon ───────────────────────────────────
+function makePinIcon(color: string, isSelected = false) {
+  const size  = isSelected ? 40 : 32;
+  const ring  = isSelected ? "3px solid #fff" : "2px solid rgba(255,255,255,0.8)";
+  const glow  = isSelected ? `0 0 0 4px ${color}50, 0 4px 16px rgba(0,0,0,0.4)` : `0 2px 10px rgba(0,0,0,0.3)`;
+  return L.divIcon({
+    className: "",
+    html: `
+      <div style="position:relative;display:flex;flex-direction:column;align-items:center;cursor:pointer;">
+        <div style="
+          width:${size}px;height:${size}px;
+          border-radius:50% 50% 50% 0;
+          transform:rotate(-45deg);
+          background:${color};
+          border:${ring};
+          box-shadow:${glow};
+          transition:transform 0.15s,box-shadow 0.15s;
+        "></div>
+        <div style="
+          width:6px;height:6px;
+          background:rgba(0,0,0,0.25);
+          border-radius:50%;
+          margin-top:-2px;
+          filter:blur(2px);
+        "></div>
+      </div>`,
+    iconSize:   [size, size + 8],
+    iconAnchor: [size / 2, size + 8],
+  });
+}
 
 export default function WellMap() {
-  const [wells, setWells] = useState<any[]>([]);
-  const [regionFilter, setRegionFilter] = useState("all");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const mapRef = useRef<HTMLDivElement>(null);
+  const [wells,        setWells]        = useState<any[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState<string | null>(null);
+  const [search,       setSearch]       = useState("");
+  const [fieldFilter,  setFieldFilter]  = useState("all");
+  const [zoneFilter,   setZoneFilter]   = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [selected,     setSelected]     = useState<any | null>(null);
+
+  const mapRef         = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
-  const markersRef = useRef<L.LayerGroup | null>(null);
-  const navigate = useNavigate();
+  const markersRef     = useRef<Map<number, L.Marker>>(new Map());
+  const layerGroupRef  = useRef<L.LayerGroup | null>(null);
+  const navigate       = useNavigate();
 
-
-
-  // ── Fetch wells ──
+  // ── Fetch wells ──────────────────────────────────────────────────
   useEffect(() => {
-    const fetchWells = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await api.get(`/wells`);
-        setWells(res.data || []);
-      } catch (err: any) {
-        const msg = err.response?.data?.detail || "Erreur lors du chargement des puits";
-        setError(msg);
-        console.error("Map error:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchWells();
+    api.get("/wells")
+      .then(res => {
+        const data = Array.isArray(res.data) ? res.data
+          : Array.isArray(res.data?.items) ? res.data.items : [];
+        setWells(data);
+      })
+      .catch(err => setError(err.response?.data?.detail || "Erreur lors du chargement"))
+      .finally(() => setLoading(false));
   }, []);
 
-  // ── Initialize map ──
+  // ── Init Leaflet map ─────────────────────────────────────────────
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
 
@@ -65,193 +97,275 @@ export default function WellMap() {
     L.control.zoom({ position: "bottomright" }).addTo(map);
     L.control.attribution({ position: "bottomleft", prefix: false }).addTo(map);
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
-      maxZoom: 18,
+    // Light clean tile (like Google Maps)
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+      attribution: "&copy; <a href='https://carto.com/'>CARTO</a>",
+      maxZoom: 19,
     }).addTo(map);
 
     mapInstanceRef.current = map;
-    markersRef.current = L.layerGroup().addTo(map);
+    layerGroupRef.current  = L.layerGroup().addTo(map);
 
-    return () => {
-      map.remove();
-      mapInstanceRef.current = null;
-      markersRef.current = null;
-    };
+    return () => { map.remove(); mapInstanceRef.current = null; };
   }, []);
 
-  // ── Update markers when wells/filter change ──
+  // ── Derived filter options ───────────────────────────────────────
+  const fields  = useMemo(() => [...new Set(wells.map(w => w.field).filter(Boolean))],  [wells]);
+  const zones   = useMemo(() => [...new Set(wells.map(w => w.zone || w.region).filter(Boolean))], [wells]);
+
+  // ── Filtered wells ───────────────────────────────────────────────
+  const filtered = useMemo(() => wells.filter(w => {
+    const q = search.toLowerCase();
+    const matchSearch  = !q || (w.name || "").toLowerCase().includes(q) || (w.code || "").toLowerCase().includes(q) || (w.zone || w.region || "").toLowerCase().includes(q);
+    const matchField   = fieldFilter  === "all" || w.field  === fieldFilter;
+    const matchZone    = zoneFilter   === "all" || w.zone   === zoneFilter || w.region === zoneFilter;
+    const matchStatus  = statusFilter === "all" || w.status === statusFilter;
+    return matchSearch && matchField && matchZone && matchStatus;
+  }), [wells, search, fieldFilter, zoneFilter, statusFilter]);
+
+  // ── Update markers on filter/selection change ────────────────────
   useEffect(() => {
-    if (!markersRef.current || !mapInstanceRef.current) return;
+    if (!layerGroupRef.current || !mapInstanceRef.current) return;
 
-    markersRef.current.clearLayers();
+    layerGroupRef.current.clearLayers();
+    markersRef.current.clear();
 
-    const regions = [...new Set(wells.map((w) => w.region))];
-    const filtered = wells.filter(
-      (w) => regionFilter === "all" || w.region === regionFilter
-    );
+    filtered.forEach(well => {
+      if (!well.latitude || !well.longitude) return;
+      const isSelected = selected?.id === well.id || selected?.well_id === well.well_id;
+      const color  = STATUS_COLOR[well.status] || "#f97316";
+      const icon   = makePinIcon(color, isSelected);
 
-    filtered.forEach((well) => {
-      const color = statusVariant[well.status] || "#f97316";
-      
-      const icon = L.divIcon({
-        className: "",
-        html: `
-          <div style="position:relative;">
-            <div style="width:24px;height:24px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 0 14px ${color}90, 0 2px 10px rgba(0,0,0,0.25);cursor:pointer;transition:transform 0.2s;" onmouseover="this.style.transform='scale(1.4)'" onmouseout="this.style.transform='scale(1)'"></div>
-            <div style="position:absolute;top:-30px;left:50%;transform:translateX(-50%);background:rgba(30,41,59,0.9);color:#fff;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700;white-space:nowrap;pointer-events:none;backdrop-filter:blur(4px);">${well.code || well.name}</div>
-          </div>
-        `,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
-      });
+      const marker = L.marker([well.latitude, well.longitude], { icon })
+        .addTo(layerGroupRef.current!);
 
-      const marker = L.marker(
-        [well.latitude, well.longitude],
-        { icon }
-      ).addTo(markersRef.current!);
-
-      marker.bindPopup(`
-        <div style="min-width:220px;font-family:Inter,sans-serif;padding:4px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-            <div style="width:8px;height:8px;border-radius:50%;background:${color};box-shadow:0 0 6px ${color};"></div>
-            <h3 style="font-weight:700;font-size:14px;margin:0;color:#1e293b;">${well.name}</h3>
-          </div>
-          <div style="background:rgba(0,0,0,0.04);border-radius:8px;padding:10px;margin-bottom:10px;">
-            <div style="font-size:11px;line-height:1.8;color:#64748b;">
-              <div style="display:flex;justify-content:space-between;"><span>🏭 Champ</span><span style="color:#1e293b;font-weight:500;">${well.field || "N/A"}</span></div>
-              <div style="display:flex;justify-content:space-between;"><span>📍 Région</span><span style="color:#1e293b;font-weight:500;">${well.region}</span></div>
-              <div style="display:flex;justify-content:space-between;"><span>📏 Profondeur</span><span style="color:#1e293b;font-weight:500;">${(well.depth || 0).toLocaleString()} m</span></div>
-              <div style="display:flex;justify-content:space-between;"><span>🔧 Opérateur</span><span style="color:#1e293b;font-weight:500;">${well.operator || "N/A"}</span></div>
-              <div style="display:flex;justify-content:space-between;"><span>📊 Statut</span><span style="color:${color};font-weight:600;">${statusLabels[well.status] || well.status}</span></div>
-            </div>
-          </div>
-          <button onclick="window.location.href='/wells/${well.id}'" style="display:block;width:100%;padding:8px;text-align:center;background:linear-gradient(135deg, #f97316, #ea580c);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:opacity 0.2s;" onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
-            Voir les Détails →
-          </button>
-        </div>
-      `, {
-        className: "custom-popup",
-        maxWidth: 280,
-      });
+      marker.on("click", () => setSelected(well));
+      markersRef.current.set(well.id, marker);
     });
 
-    // ── Auto zoom to bounds ──
+    // Fit bounds to visible wells
     if (filtered.length > 0) {
-      const bounds = L.latLngBounds(
-        filtered.map((w) => [w.latitude, w.longitude])
-      );
-      mapInstanceRef.current.fitBounds(bounds, {
-        padding: [60, 60],
-        maxZoom: 7,
-      });
+      const validWells = filtered.filter(w => w.latitude && w.longitude);
+      if (validWells.length > 0) {
+        const bounds = L.latLngBounds(validWells.map(w => [w.latitude, w.longitude]));
+        mapInstanceRef.current.fitBounds(bounds, { padding: [80, 80], maxZoom: 8 });
+      }
     }
-  }, [wells, regionFilter]);
+  }, [filtered, selected]);
 
-  // ── Compute stats ──
-  const regions = [...new Set(wells.map((w) => w.region))];
-  const filtered = wells.filter(
-    (w) => regionFilter === "all" || w.region === regionFilter
+  // ── Pan to selected well ─────────────────────────────────────────
+  useEffect(() => {
+    if (selected && mapInstanceRef.current && selected.latitude && selected.longitude) {
+      mapInstanceRef.current.panTo([selected.latitude, selected.longitude], { animate: true, duration: 0.5 });
+    }
+  }, [selected]);
+
+
+  // ── Status badge counts ──────────────────────────────────────────
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    filtered.forEach(w => { counts[w.status] = (counts[w.status] || 0) + 1; });
+    return counts;
+  }, [filtered]);
+
+  if (error) return (
+    <div className="space-y-4">
+      <h1 className="text-2xl font-bold text-foreground">Carte des Puits</h1>
+      <div className="glass-card rounded-xl p-6 border-l-4 border-destructive">
+        <p className="text-destructive font-semibold">❌ Erreur</p>
+        <p className="text-sm text-muted-foreground mt-1">{error}</p>
+      </div>
+    </div>
   );
 
-  const statusCounts = {
-    active: filtered.filter((w) => w.status === "active").length,
-    drilling: filtered.filter((w) => w.status === "drilling").length,
-    completed: filtered.filter((w) => w.status === "completed").length,
-    inactive: filtered.filter((w) => w.status === "inactive").length,
-  };
-
-  if (error) {
-    return (
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Carte des Puits</h1>
-        </div>
-        <div className="glass-card rounded-xl p-6 border-l-4 border-destructive">
-          <p className="text-destructive font-semibold">❌ Erreur</p>
-          <p className="text-sm text-muted-foreground mt-1">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Carte des Puits</h1>
-          <p className="text-sm text-muted-foreground">
-            {loading ? "Chargement..." : `${filtered.length} puits affichés sur la carte`}
-          </p>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            {Object.entries(statusLabels).map(([key, label]) => (
-              <div key={key} className="flex items-center gap-1.5">
-                <div
-                  className="w-2.5 h-2.5 rounded-full"
-                  style={{
-                    backgroundColor: statusVariant[key],
-                    boxShadow: `0 0 6px ${statusVariant[key]}60`,
-                  }}
-                />
-                <span className="text-xs text-muted-foreground">
-                  {label} ({statusCounts[key as keyof typeof statusCounts]})
-                </span>
-              </div>
+    <div className="flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
+
+      {/* ── TOP PANEL ───────────────────────────────────────────── */}
+      <div className="flex-shrink-0 space-y-3 pb-3">
+        {/* Title row */}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Carte des Puits</h1>
+            <p className="text-sm text-muted-foreground">
+              {loading ? "Chargement…" : `${filtered.length} puits affichés`}
+            </p>
+          </div>
+          {/* Status legend */}
+          <div className="flex items-center gap-3 flex-wrap">
+            {Object.entries(STATUS_LABEL).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setStatusFilter(prev => prev === key ? "all" : key)}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-all border ${
+                  statusFilter === key
+                    ? "border-transparent font-bold scale-105"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+                style={statusFilter === key ? { backgroundColor: STATUS_COLOR[key] + "20", color: STATUS_COLOR[key] } : {}}
+              >
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: STATUS_COLOR[key], boxShadow: `0 0 5px ${STATUS_COLOR[key]}` }} />
+                {label} {statusCounts[key] ? `(${statusCounts[key]})` : ""}
+              </button>
             ))}
           </div>
-          <Select value={regionFilter} onValueChange={setRegionFilter}>
-            <SelectTrigger className="w-48">
-              <Filter className="w-4 h-4 mr-2" />
-              <SelectValue placeholder="Filtrer par région" />
+        </div>
+
+        {/* Filter row */}
+        <div className="flex flex-wrap gap-2">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[220px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Rechercher par nom ou zone…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="pl-9"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          {/* Field filter */}
+          <Select value={fieldFilter} onValueChange={setFieldFilter}>
+            <SelectTrigger className="w-40">
+              <Layers className="w-4 h-4 mr-2" />
+              <SelectValue placeholder="Champ" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Toutes les Régions</SelectItem>
-              {regions.map((r) => (
-                <SelectItem key={r} value={r}>
-                  {r}
-                </SelectItem>
-              ))}
+              <SelectItem value="all">Tous les Champs</SelectItem>
+              {fields.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
             </SelectContent>
           </Select>
+          {/* Zone filter */}
+          <Select value={zoneFilter} onValueChange={setZoneFilter}>
+            <SelectTrigger className="w-40">
+              <Filter className="w-4 h-4 mr-2" />
+              <SelectValue placeholder="Zone" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Toutes les Zones</SelectItem>
+              {zones.map(z => <SelectItem key={String(z)} value={String(z)}>{String(z)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {/* Clear filters */}
+          {(search || fieldFilter !== "all" || zoneFilter !== "all" || statusFilter !== "all") && (
+            <button
+              onClick={() => { setSearch(""); setFieldFilter("all"); setZoneFilter("all"); setStatusFilter("all"); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground border border-border/50 hover:border-primary/50 transition"
+            >
+              <X className="w-3.5 h-3.5" /> Réinitialiser
+            </button>
+          )}
         </div>
       </div>
 
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="glass-card rounded-xl overflow-hidden relative"
-        style={{ height: "calc(100vh - 160px)" }}
-      >
+      {/* ── FULLSCREEN MAP ──────────────────────────────────────── */}
+      <div className="flex-1 relative glass-card rounded-xl overflow-hidden">
+
+        {/* Loading overlay */}
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-50 rounded-xl">
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30 z-50 rounded-xl">
             <div className="text-white text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
-              <p>Chargement de la carte...</p>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2" />
+              <p className="text-sm">Chargement de la carte…</p>
             </div>
           </div>
         )}
-        <div ref={mapRef} style={{ height: "100%", width: "100%" }} className="rounded-xl" />
+
+        {/* Map container */}
+        <div ref={mapRef} className="h-full w-full" />
+
+        {/* ── Well Detail Sidebar ─────────────────────────────── */}
+        <AnimatePresence>
+          {selected && (
+            <motion.div
+              initial={{ x: 340, opacity: 0 }}
+              animate={{ x: 0,   opacity: 1 }}
+              exit={{   x: 340, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 320, damping: 30 }}
+              className="absolute top-4 right-4 bottom-4 w-80 z-[1000] flex flex-col"
+              style={{ pointerEvents: "all" }}
+            >
+              <div className="glass-card rounded-xl flex flex-col h-full overflow-hidden"
+                style={{ background: "rgba(255,255,255,0.97)", backdropFilter: "blur(16px)", border: "1px solid rgba(0,0,0,0.08)", boxShadow: "0 8px 32px rgba(0,0,0,0.12)" }}>
+
+                {/* Header */}
+                <div className="p-4 border-b border-gray-100 flex-shrink-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xl flex-shrink-0">📍</span>
+                      <div className="min-w-0">
+                        <h2 className="font-bold text-gray-900 truncate">{selected.name || selected.code}</h2>
+                        <p className="text-xs text-gray-500">{selected.code}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setSelected(null)} className="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 transition flex-shrink-0">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {/* Status badge */}
+                  <div className="mt-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+                      style={{ backgroundColor: (STATUS_COLOR[selected.status] || "#888") + "25", color: STATUS_COLOR[selected.status] || "#888", border: `1px solid ${STATUS_COLOR[selected.status] || "#888"}40` }}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: STATUS_COLOR[selected.status] || "#888" }} />
+                      {STATUS_LABEL[selected.status] || selected.status}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Details */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {[
+                    { icon: Layers,    label: "Champ",       value: selected.field || "—" },
+                    { icon: Filter,    label: "Zone / Région",value: selected.zone || selected.region || "—" },
+                    { icon: Ruler,     label: "Profondeur",   value: `${(selected.total_depth_m || selected.depth || 0).toLocaleString()} m` },
+                    { icon: Building2, label: "Opérateur",    value: selected.operator || "—" },
+                    { icon: MapPin,    label: "Coordonnées",  value: `${selected.latitude?.toFixed(4)}°N, ${selected.longitude?.toFixed(4)}°E` },
+                  ].map(item => (
+                    <div key={item.label} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100">
+                      <item.icon className="w-4 h-4 mt-0.5 flex-shrink-0 text-orange-500" />
+                      <div className="min-w-0">
+                        <p className="text-[10px] text-gray-400 uppercase tracking-wider">{item.label}</p>
+                        <p className="text-sm font-medium text-gray-800 truncate">{item.value}</p>
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="p-3 rounded-lg text-center bg-orange-50 border border-orange-100">
+                    <Droplets className="w-5 h-5 mx-auto mb-1 text-orange-400" />
+                    <p className="text-xs text-gray-500">Puits pétrolier</p>
+                  </div>
+                </div>
+
+                {/* CTA */}
+                <div className="p-4 border-t border-gray-100 flex-shrink-0">
+                  <button
+                    onClick={() => navigate(`/wells/${selected.id || selected.well_id}`)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-semibold text-white transition hover:opacity-90 active:scale-95"
+                    style={{ background: "linear-gradient(135deg, #f97316, #ea580c)" }}
+                  >
+                    Voir les Détails <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Popup style overrides */}
         <style>{`
-          .custom-popup .leaflet-popup-content-wrapper {
-            background: rgba(255, 255, 255, 0.97);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(0,0,0,0.1);
-            border-radius: 12px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-            color: #1e293b;
+          .leaflet-control-zoom a {
+            background: rgba(255,255,255,0.95) !important;
+            color: #374151 !important;
+            border-color: rgba(0,0,0,0.1) !important;
           }
-          .custom-popup .leaflet-popup-tip {
-            background: rgba(255, 255, 255, 0.97);
-            border: 1px solid rgba(0,0,0,0.1);
-          }
-          .custom-popup .leaflet-popup-close-button {
-            color: #64748b !important;
-            font-size: 18px !important;
-          }
+          .leaflet-control-zoom a:hover { background: #f97316 !important; color: #fff !important; }
+          .leaflet-bar { border: 1px solid rgba(0,0,0,0.1) !important; border-radius: 8px !important; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.12) !important; }
         `}</style>
-      </motion.div>
+      </div>
     </div>
   );
 }
